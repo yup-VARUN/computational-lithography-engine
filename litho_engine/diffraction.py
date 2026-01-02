@@ -77,23 +77,23 @@ class FraunhoferDiffraction(nn.Module):
             device: PyTorch device
             
         Returns:
-            torch.Tensor: Pupil function
+            torch.Tensor: Pupil function (in shifted/centered coordinates)
         """
-        # Create frequency grid
-        fy = torch.fft.fftfreq(height, d=1.0).to(device)
-        fx = torch.fft.fftfreq(width, d=1.0).to(device)
+        # Create frequency grid (shifted, so DC is at center)
+        fy = torch.fft.fftshift(torch.fft.fftfreq(height, d=1.0)).to(device)
+        fx = torch.fft.fftshift(torch.fft.fftfreq(width, d=1.0)).to(device)
         
-        fx_grid, fy_grid = torch.meshgrid(fx, fy, indexing='xy')
+        fy_grid, fx_grid = torch.meshgrid(fy, fx, indexing='ij')
         
         # Frequency magnitude
         freq_mag = torch.sqrt(fx_grid**2 + fy_grid**2)
         
-        # Cutoff frequency based on NA
-        # For simplicity, normalize by the maximum frequency
-        cutoff = self.NA * (height / 2)  # Simplified cutoff
+        # Cutoff frequency based on NA (normalized)
+        # More permissive cutoff to allow DC and low frequencies
+        cutoff = self.NA  # Normalized cutoff frequency
         
-        # Circular pupil
-        pupil = (freq_mag <= cutoff / height).float()
+        # Circular pupil - allow frequencies up to cutoff
+        pupil = (freq_mag <= cutoff).float()
         
         return pupil.unsqueeze(0).unsqueeze(0)
     

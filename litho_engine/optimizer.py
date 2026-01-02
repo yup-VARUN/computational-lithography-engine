@@ -184,7 +184,7 @@ class AdaptiveMaskOptimizer(MaskOptimizer):
         # Use learning rate scheduler
         if use_scheduler:
             self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, mode='min', factor=0.5, patience=20, verbose=False
+                self.optimizer, mode='min', factor=0.5, patience=20
             )
         else:
             self.scheduler = None
