@@ -460,7 +460,7 @@ def generate_multi_size_image():
 
     for i, sz in enumerate(sizes):
         target = create_arbitrary_pattern(sz, 'cross')
-        iters = 200 if sz <= 256 else 150
+        iters = 200 if sz <= 256 else 150  # fewer iters for large grids to limit runtime
         opt = AdaptiveMaskOptimizer(
             diffraction, (sz, sz), learning_rate=0.05,
             regularization=0.001, use_scheduler=True)
