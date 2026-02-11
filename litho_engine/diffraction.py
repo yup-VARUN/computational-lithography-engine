@@ -24,7 +24,7 @@ class FraunhoferDiffraction(nn.Module):
         use_coherent (bool): If True, use coherent illumination; otherwise partially coherent
     """
     
-    def __init__(self, wavelength=193.0, pixel_size=10.0, NA=0.6, use_coherent=True):
+    def __init__(self, wavelength=13.5, pixel_size=1.0, NA=0.33, use_coherent=True):
         super(FraunhoferDiffraction, self).__init__()
         self.wavelength = wavelength
         self.pixel_size = pixel_size
@@ -71,6 +71,10 @@ class FraunhoferDiffraction(nn.Module):
         """
         Create circular pupil function based on numerical aperture.
         
+        The cutoff spatial frequency of the optical system is NA/λ (in
+        cycles/nm).  ``torch.fft.fftfreq`` with ``d=pixel_size`` returns
+        frequencies in cycles/nm, so the cutoff can be applied directly.
+        
         Args:
             height (int): Height of the mask
             width (int): Width of the mask
@@ -79,18 +83,17 @@ class FraunhoferDiffraction(nn.Module):
         Returns:
             torch.Tensor: Pupil function (in shifted/centered coordinates)
         """
-        # Create frequency grid (shifted, so DC is at center)
-        fy = torch.fft.fftshift(torch.fft.fftfreq(height, d=1.0)).to(device)
-        fx = torch.fft.fftshift(torch.fft.fftfreq(width, d=1.0)).to(device)
+        # Create frequency grid in physical units (cycles / nm)
+        fy = torch.fft.fftshift(torch.fft.fftfreq(height, d=self.pixel_size)).to(device)
+        fx = torch.fft.fftshift(torch.fft.fftfreq(width, d=self.pixel_size)).to(device)
         
         fy_grid, fx_grid = torch.meshgrid(fy, fx, indexing='ij')
         
-        # Frequency magnitude
+        # Frequency magnitude (cycles / nm)
         freq_mag = torch.sqrt(fx_grid**2 + fy_grid**2)
         
-        # Cutoff frequency based on NA (normalized)
-        # More permissive cutoff to allow DC and low frequencies
-        cutoff = self.NA  # Normalized cutoff frequency
+        # Physical cutoff: NA / wavelength (cycles / nm)
+        cutoff = self.NA / self.wavelength
         
         # Circular pupil - allow frequencies up to cutoff
         pupil = (freq_mag <= cutoff).float()

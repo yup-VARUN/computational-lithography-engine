@@ -68,6 +68,31 @@ class TestFraunhoferDiffraction:
         # Total intensity should be positive
         assert total_intensity > 0
         
+    def test_visible_diffraction_effects(self):
+        """Test that diffraction produces visible effects (aerial image != mask)."""
+        diffraction = FraunhoferDiffraction(
+            wavelength=13.5, pixel_size=1.0, NA=0.33)
+        mask = create_test_mask(size=64, pattern_type='square')
+
+        with torch.no_grad():
+            intensity = diffraction(mask).squeeze()
+
+        diff = torch.abs(intensity - mask)
+        # Diffraction should cause significant difference
+        assert diff.mean().item() > 0.01, (
+            "Aerial image is too similar to mask — no visible diffraction")
+
+    def test_pupil_cutoff_uses_physical_units(self):
+        """Test that the pupil cutoff scales with wavelength and pixel_size."""
+        # Larger pixel_size (finer sampling in frequency) should let less through
+        d_fine = FraunhoferDiffraction(wavelength=13.5, pixel_size=0.5, NA=0.33)
+        d_coarse = FraunhoferDiffraction(wavelength=13.5, pixel_size=2.0, NA=0.33)
+        n = 64
+        pupil_fine = d_fine._create_pupil_function(n, n, torch.device('cpu'))
+        pupil_coarse = d_coarse._create_pupil_function(n, n, torch.device('cpu'))
+        # Coarser pixel → higher cutoff in normalised freq → more frequencies pass
+        assert pupil_coarse.sum() > pupil_fine.sum()
+
     def test_create_test_masks(self):
         """Test creation of different mask patterns."""
         patterns = ['square', 'circle', 'lines']
