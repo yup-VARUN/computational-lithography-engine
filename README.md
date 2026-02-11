@@ -4,9 +4,11 @@ A differentiable physics engine for **EUV (Extreme Ultraviolet) computational li
 
 ## Visual Proof — It Works!
 
+All visualisations below use **aggressive diffraction conditions** (λ = 13.5 nm, NA = 0.10, pixel = 1 nm) so that diffraction effects are unmistakable. The resolution limit at NA = 0.10 is ≈ 67 nm — well above the feature sizes in each pattern — forcing the optimiser to work hard to recover the target.
+
 ### Inverse Mask Optimisation (Animated)
 
-The engine automatically finds the optimal photomask that produces any desired chip pattern under realistic EUV diffraction. Watch the optimiser converge in real time — note how the **optimised mask differs significantly from the target** due to diffraction compensation:
+The engine automatically finds the optimal photomask that produces any desired chip pattern under heavy EUV diffraction. Watch the optimiser converge in real time — note how the **optimised mask differs dramatically from the target** because it must pre-compensate for severe diffraction blurring:
 
 ![Inverse lithography optimisation — cross pattern](docs/images/optimization_cross.gif)
 
@@ -16,31 +18,31 @@ The engine automatically finds the optimal photomask that produces any desired c
 
 ### Arbitrary Input Shapes
 
-The engine handles **any** target geometry — L-shapes, T-shapes, rings, crosses, diamonds, zigzags, and more. All at nm-scale with visible EUV diffraction effects:
+The engine handles **any** target geometry — L-shapes, T-shapes, rings, crosses, diamonds, zigzags, and more. All at nm-scale under aggressive diffraction (NA = 0.10):
 
 ![Arbitrary shapes gallery](docs/images/arbitrary_shapes_gallery.png)
 
 ### EUV Forward Diffraction — Varying Numerical Aperture
 
-Forward diffraction simulation at **λ = 13.5 nm** across different NA values (0.25, 0.33, 0.55 High-NA). Axes are labelled in nanometres. Diffraction effects (blurring, ringing, Airy patterns) are clearly visible:
+Forward diffraction simulation at **λ = 13.5 nm** across three NA values (0.10 aggressive, 0.20, 0.33). At NA = 0.10 the resolution limit (≈ 67 nm) exceeds most feature sizes, producing extreme blurring, ringing, and Airy-like patterns. As NA increases the image sharpens:
 
 ![Forward diffraction comparison](docs/images/forward_diffraction_comparison.png)
 
 ### Multiple Field-of-View Sizes
 
-Works with any mask dimensions — demonstrated here at 128 nm, 256 nm, and 512 nm fields of view:
+Works with any mask dimensions — demonstrated here at 128 nm, 256 nm, and 512 nm fields of view, all under aggressive diffraction (NA = 0.10):
 
 ![Multi-size demonstration](docs/images/multi_size_demo.png)
 
 ### Thermal Compensation (Silicon Wafer Heating & Cooling)
 
-During EUV lithography the wafer is hot (200 °C). When it cools to operating temperature (80 °C), silicon contracts according to its temperature-dependent coefficient of thermal expansion (CTE). Without compensation the printed pattern shrinks and no longer matches the target. The engine pre-compensates the mask so the **cooled-down chip perfectly matches the intended geometry**:
+During EUV lithography the wafer is hot (200 °C). When it cools to operating temperature (80 °C), silicon contracts according to its temperature-dependent coefficient of thermal expansion (CTE). Without compensation the printed pattern shrinks and no longer matches the target. The engine pre-compensates the mask so the **cooled-down chip perfectly matches the intended geometry** (all under aggressive NA = 0.10 diffraction):
 
 ![Thermal compensation](docs/images/thermal_compensation.png)
 
 ### Thermal-Aware Optimisation (Animated)
 
-Full thermal-aware inverse lithography: the optimiser accounts for silicon thermal expansion coefficients so the pattern at 80 °C matches the target:
+Full thermal-aware inverse lithography under aggressive diffraction (NA = 0.10): the optimiser accounts for both severe diffraction and silicon thermal expansion so the pattern at 80 °C matches the target:
 
 ![Thermal-aware optimisation animation](docs/images/thermal_optimization.gif)
 
@@ -55,7 +57,7 @@ This engine provides a complete framework for **EUV computational lithography** 
 - **Thermal Expansion Modelling**: Silicon wafer heating/cooling effects with temperature-dependent CTE (Okada & Tokumaru, 1984)
 - **Thermal-Aware Optimisation**: Pre-compensates masks so the cooled chip (80 °C) matches the target geometry
 - **Differentiable Architecture**: Built on PyTorch for automatic differentiation and GPU acceleration
-- **EUV-Focused**: Default parameters set for λ = 13.5 nm, NA = 0.33, nm-scale pixel size — where diffraction effects are significant and clearly visible
+- **EUV-Focused**: Default parameters set for λ = 13.5 nm, NA = 0.10, nm-scale pixel size — aggressive diffraction regime where the resolution limit exceeds feature sizes, making optimiser convergence clearly visible
 
 ## Installation
 
@@ -85,11 +87,11 @@ import torch
 from litho_engine import FraunhoferDiffraction
 from litho_engine.diffraction import create_test_mask
 
-# Create diffraction model (EUV lithography parameters)
+# Create diffraction model (EUV lithography — aggressive diffraction)
 diffraction = FraunhoferDiffraction(
     wavelength=13.5,   # nm — EUV
     pixel_size=1.0,    # nm per pixel
-    NA=0.33            # Numerical aperture
+    NA=0.10            # Low NA → aggressive diffraction
 )
 
 # Create a test mask
@@ -252,7 +254,7 @@ P(fx,fy) = 1 if √(fx² + fy²) ≤ NA/λ   (cycles/nm)
          = 0 otherwise
 ```
 
-This creates the fundamental resolution limit in optical lithography. For EUV at λ = 13.5 nm with NA = 0.33, the cutoff frequency is ~0.024 cycles/nm, meaning features smaller than ~20 nm are strongly diffracted.
+This creates the fundamental resolution limit in optical lithography. For EUV at λ = 13.5 nm with NA = 0.10, the cutoff frequency is ~0.0074 cycles/nm, meaning features smaller than ~67 nm are strongly diffracted — producing the dramatic blurring visible in the animations above.
 
 ### Inverse Optimization
 

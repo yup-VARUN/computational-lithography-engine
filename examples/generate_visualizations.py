@@ -39,9 +39,12 @@ from litho_engine.diffraction import create_test_mask
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'images')
 FINAL_FRAME_HOLD_COUNT = 15
 
-# ── EUV defaults ──────────────────────────────────────────────────────────
+# ── EUV defaults — aggressive diffraction ─────────────────────────────────
+# Use a low NA so that the resolution limit (λ/(2·NA) ≈ 67 nm) is well
+# above typical feature sizes, producing strong, clearly visible
+# diffraction effects that showcase the inverse-mask optimiser in action.
 EUV_WAVELENGTH = 13.5   # nm
-EUV_NA = 0.33            # standard EUV NA
+EUV_NA = 0.10            # low NA → aggressive diffraction
 EUV_PIXEL = 1.0          # nm per pixel
 
 
@@ -242,12 +245,12 @@ def generate_forward_diffraction_image():
 
     patterns = ['square', 'circle', 'lines']
     configs = [
-        {'wavelength': 13.5, 'NA': 0.25, 'pixel_size': 1.0,
-         'label': 'EUV 13.5 nm, NA = 0.25'},
+        {'wavelength': 13.5, 'NA': 0.10, 'pixel_size': 1.0,
+         'label': 'EUV 13.5 nm, NA = 0.10 (aggressive)'},
+        {'wavelength': 13.5, 'NA': 0.20, 'pixel_size': 1.0,
+         'label': 'EUV 13.5 nm, NA = 0.20'},
         {'wavelength': 13.5, 'NA': 0.33, 'pixel_size': 1.0,
          'label': 'EUV 13.5 nm, NA = 0.33'},
-        {'wavelength': 13.5, 'NA': 0.55, 'pixel_size': 1.0,
-         'label': 'EUV 13.5 nm, NA = 0.55 (High-NA)'},
     ]
     size = 256
 
