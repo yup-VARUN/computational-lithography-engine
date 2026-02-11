@@ -23,10 +23,10 @@ def main():
     print("=" * 60)
     
     # Create diffraction model
-    # Parameters typical for DUV lithography at 193nm
-    wavelength = 193.0  # nm
-    pixel_size = 10.0   # nm
-    NA = 0.6            # Numerical aperture
+    # Parameters for EUV lithography at 13.5nm
+    wavelength = 13.5   # nm (EUV)
+    pixel_size = 1.0    # nm
+    NA = 0.33           # Numerical aperture
     
     diffraction = FraunhoferDiffraction(
         wavelength=wavelength,

@@ -1,23 +1,29 @@
 #!/usr/bin/env python
 """
 Generate Visualizations and Animations for Computational Lithography Engine
+===========================================================================
+All simulations use **EUV lithography** parameters (λ = 13.5 nm) with nm-scale
+pixel sizes so that diffraction effects are clearly visible.
 
 Produces:
-  1. Animated GIF of inverse mask optimization converging (multiple patterns)
-  2. Static comparison images showing forward diffraction for various configurations
-  3. Thermal compensation visualization showing hot vs cooled patterns
-  4. Multi-wavelength / multi-NA comparison
-  5. Arbitrary input shape demonstration
+  1. Animated GIFs of inverse mask optimization converging (multiple patterns)
+  2. Static comparison of forward diffraction at multiple EUV NA settings
+  3. Thermal compensation visualization (Si wafer cooling 200 °C → 80 °C)
+  4. Arbitrary input shape gallery with ILT optimisation
+  5. Multi-size (field-of-view) demonstration
+  6. Thermal-aware ILT animation
 
-All outputs saved to docs/images/ for embedding in README.md.
+All outputs saved to ``docs/images/`` for embedding in README.md.
 """
 
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
+import matplotlib.ticker as ticker
 import imageio.v2 as imageio
 import os
 import sys
@@ -33,9 +39,32 @@ from litho_engine.diffraction import create_test_mask
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'images')
 FINAL_FRAME_HOLD_COUNT = 15
 
+# ── EUV defaults ──────────────────────────────────────────────────────────
+EUV_WAVELENGTH = 13.5   # nm
+EUV_NA = 0.33            # standard EUV NA
+EUV_PIXEL = 1.0          # nm per pixel
+
 
 def ensure_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Helper: add nm-scale axis labels to an Axes
+# ---------------------------------------------------------------------------
+
+def _set_nm_axes(ax, size, pixel_size, label=True):
+    """Show tick marks in nanometres instead of pixel indices."""
+    extent_nm = size * pixel_size
+    ticks_px = np.linspace(0, size - 1, 5)
+    labels_nm = [f"{t * pixel_size:.0f}" for t in ticks_px]
+    ax.set_xticks(ticks_px)
+    ax.set_xticklabels(labels_nm, fontsize=7)
+    ax.set_yticks(ticks_px)
+    ax.set_yticklabels(labels_nm, fontsize=7)
+    if label:
+        ax.set_xlabel('nm', fontsize=8)
+        ax.set_ylabel('nm', fontsize=8)
 
 
 # ---------------------------------------------------------------------------
@@ -50,17 +79,13 @@ def create_arbitrary_pattern(size, pattern_name):
     if pattern_name == 'L_shape':
         w = size // 8
         h = size // 2
-        # Vertical bar
         mask[center - h:center + h, center - h:center - h + w] = 1.0
-        # Horizontal bar (bottom)
         mask[center + h - w:center + h, center - h:center + h // 2] = 1.0
 
     elif pattern_name == 'T_shape':
         w = size // 8
         h = size // 3
-        # Vertical stem
         mask[center - h // 2:center + h, center - w:center + w] = 1.0
-        # Horizontal top bar
         mask[center - h // 2 - w:center - h // 2 + w,
              center - h:center + h] = 1.0
 
@@ -100,7 +125,6 @@ def create_arbitrary_pattern(size, pattern_name):
                 mask[y_end - w:y_end, x_lo:x_hi] = 1.0
 
     else:
-        # Fallback: use built-in
         mask = create_test_mask(size, pattern_type=pattern_name)
 
     return mask
@@ -110,34 +134,36 @@ def create_arbitrary_pattern(size, pattern_name):
 # 1. Inverse mask optimization animation (GIF)
 # ---------------------------------------------------------------------------
 
-def generate_optimization_animation(pattern_name='cross', size=128,
-                                    n_iterations=200, gif_name=None,
-                                    wavelength=193.0, NA=0.6):
+def generate_optimization_animation(pattern_name='cross', size=256,
+                                    n_iterations=300, gif_name=None,
+                                    wavelength=EUV_WAVELENGTH, NA=EUV_NA,
+                                    pixel_size=EUV_PIXEL):
     """
-    Generate an animated GIF showing the inverse mask optimization converging.
-    Frames show: target | current mask | predicted aerial image | loss curve.
+    Animated GIF showing ILT converging.
+    Frames: target | optimised mask | aerial image | loss curve.
+    Axes annotated with nm-scale dimensions.
     """
     ensure_output_dir()
     if gif_name is None:
         gif_name = f'optimization_{pattern_name}.gif'
 
-    print(f"  Generating optimization animation: {pattern_name} "
-          f"(λ={wavelength}nm, NA={NA}) ...")
+    fov_nm = size * pixel_size
+    print(f"  Generating optimisation animation: {pattern_name}  "
+          f"(λ={wavelength} nm, NA={NA}, pixel={pixel_size} nm, "
+          f"FoV={fov_nm:.0f} nm) …")
 
-    diffraction = FraunhoferDiffraction(wavelength=wavelength, NA=NA)
+    diffraction = FraunhoferDiffraction(
+        wavelength=wavelength, pixel_size=pixel_size, NA=NA)
     target = create_arbitrary_pattern(size, pattern_name)
-
-    import torch.nn as nn
-    import torch.optim as optim
 
     mask_param = nn.Parameter(torch.rand(size, size))
     optimizer = optim.Adam([mask_param], lr=0.05)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=20)
+        optimizer, mode='min', factor=0.5, patience=25)
 
     frames = []
     loss_history = []
-    capture_every = max(1, n_iterations // 60)  # ~60 frames max
+    capture_every = max(1, n_iterations // 60)
 
     for it in range(n_iterations):
         optimizer.zero_grad()
@@ -155,42 +181,44 @@ def generate_optimization_animation(pattern_name='cross', size=128,
                 pred_np = predicted.squeeze().cpu().numpy()
                 mask_np = mask_c.squeeze().cpu().numpy()
 
-            fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+            fig, axes = plt.subplots(1, 4, figsize=(18, 4.5))
 
             axes[0].imshow(target.numpy(), cmap='inferno', vmin=0, vmax=1)
             axes[0].set_title('Target Pattern', fontsize=11, fontweight='bold')
-            axes[0].axis('off')
+            _set_nm_axes(axes[0], size, pixel_size)
 
             axes[1].imshow(mask_np, cmap='gray', vmin=0, vmax=1)
-            axes[1].set_title(f'Mask (iter {it})', fontsize=11, fontweight='bold')
-            axes[1].axis('off')
+            axes[1].set_title(f'Optimised Mask (iter {it})',
+                              fontsize=11, fontweight='bold')
+            _set_nm_axes(axes[1], size, pixel_size)
 
             axes[2].imshow(pred_np, cmap='inferno', vmin=0, vmax=1)
-            axes[2].set_title('Aerial Image', fontsize=11, fontweight='bold')
-            axes[2].axis('off')
+            axes[2].set_title('Aerial Image (on wafer)',
+                              fontsize=11, fontweight='bold')
+            _set_nm_axes(axes[2], size, pixel_size)
 
             axes[3].plot(loss_history, color='#2196F3', linewidth=2)
             axes[3].set_xlabel('Iteration')
-            axes[3].set_ylabel('Loss')
+            axes[3].set_ylabel('MSE Loss')
             axes[3].set_title('Convergence', fontsize=11, fontweight='bold')
             axes[3].set_yscale('log')
             axes[3].grid(True, alpha=0.3)
             axes[3].set_xlim(0, n_iterations)
 
-            fig.suptitle(f'Inverse Lithography Optimization — {pattern_name}  '
-                         f'(λ={wavelength}nm, NA={NA})',
-                         fontsize=13, fontweight='bold')
-            plt.tight_layout(rect=[0, 0, 1, 0.93])
+            fig.suptitle(
+                f'EUV Inverse Lithography — {pattern_name}  '
+                f'(λ = {wavelength} nm, NA = {NA}, '
+                f'FoV = {fov_nm:.0f} nm)',
+                fontsize=13, fontweight='bold')
+            plt.tight_layout(rect=[0, 0, 1, 0.92])
 
             buf = io.BytesIO()
             fig.savefig(buf, format='png', dpi=100)
             buf.seek(0)
-            frame = imageio.imread(buf)
-            frames.append(frame)
+            frames.append(imageio.imread(buf))
             plt.close(fig)
             buf.close()
 
-    # Hold final frame longer
     for _ in range(FINAL_FRAME_HOLD_COUNT):
         frames.append(frames[-1])
 
@@ -201,30 +229,35 @@ def generate_optimization_animation(pattern_name='cross', size=128,
 
 
 # ---------------------------------------------------------------------------
-# 2. Forward diffraction comparison (static)
+# 2. Forward diffraction comparison (static) — EUV at different NAs
 # ---------------------------------------------------------------------------
 
 def generate_forward_diffraction_image():
     """
-    Generate a grid showing forward diffraction for multiple patterns,
-    wavelengths, and NA values.
+    Grid showing forward diffraction for EUV at multiple NA settings.
+    Pixel size chosen so that features are near the resolution limit.
     """
     ensure_output_dir()
-    print("  Generating forward diffraction comparison ...")
+    print("  Generating forward diffraction comparison (EUV) …")
 
     patterns = ['square', 'circle', 'lines']
     configs = [
-        {'wavelength': 193.0, 'NA': 0.6, 'label': 'DUV 193nm, NA=0.6'},
-        {'wavelength': 248.0, 'NA': 0.5, 'label': 'KrF 248nm, NA=0.5'},
-        {'wavelength': 13.5, 'NA': 0.33, 'label': 'EUV 13.5nm, NA=0.33'},
+        {'wavelength': 13.5, 'NA': 0.25, 'pixel_size': 1.0,
+         'label': 'EUV 13.5 nm, NA = 0.25'},
+        {'wavelength': 13.5, 'NA': 0.33, 'pixel_size': 1.0,
+         'label': 'EUV 13.5 nm, NA = 0.33'},
+        {'wavelength': 13.5, 'NA': 0.55, 'pixel_size': 1.0,
+         'label': 'EUV 13.5 nm, NA = 0.55 (High-NA)'},
     ]
-    size = 128
+    size = 256
 
-    fig, axes = plt.subplots(len(configs), len(patterns) * 2, figsize=(20, 10))
+    fig, axes = plt.subplots(len(configs), len(patterns) * 2,
+                             figsize=(22, 11))
 
     for row, cfg in enumerate(configs):
         diffraction = FraunhoferDiffraction(
-            wavelength=cfg['wavelength'], NA=cfg['NA'])
+            wavelength=cfg['wavelength'], pixel_size=cfg['pixel_size'],
+            NA=cfg['NA'])
         for col, pat in enumerate(patterns):
             mask = create_test_mask(size, pat)
             with torch.no_grad():
@@ -235,19 +268,20 @@ def generate_forward_diffraction_image():
 
             ax_mask.imshow(mask.numpy(), cmap='gray', vmin=0, vmax=1)
             ax_mask.set_title(f'{pat} mask', fontsize=9)
-            ax_mask.axis('off')
+            _set_nm_axes(ax_mask, size, cfg['pixel_size'], label=False)
 
             ax_int.imshow(intensity, cmap='inferno')
-            ax_int.set_title(f'Aerial image', fontsize=9)
-            ax_int.axis('off')
+            ax_int.set_title('Aerial image', fontsize=9)
+            _set_nm_axes(ax_int, size, cfg['pixel_size'], label=False)
 
-        # Row label
-        axes[row, 0].set_ylabel(cfg['label'], fontsize=10, fontweight='bold',
-                                rotation=90, labelpad=10)
+        axes[row, 0].set_ylabel(cfg['label'], fontsize=10,
+                                fontweight='bold', rotation=90, labelpad=15)
 
-    fig.suptitle('Forward Diffraction — Multiple Wavelengths & NA Settings',
-                 fontsize=14, fontweight='bold')
-    plt.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.suptitle(
+        'EUV Forward Diffraction — Varying Numerical Aperture\n'
+        f'λ = 13.5 nm · pixel = 1 nm · field = {size} nm × {size} nm',
+        fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0.06, 0, 1, 0.92])
     path = os.path.join(OUTPUT_DIR, 'forward_diffraction_comparison.png')
     fig.savefig(path, dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -261,28 +295,28 @@ def generate_forward_diffraction_image():
 
 def generate_thermal_compensation_image():
     """
-    Show the effect of thermal expansion compensation:
-      - target at 80 °C (desired)
-      - pattern at process temp (expanded)
-      - pattern after cooling WITHOUT compensation (mismatched)
-      - pattern after cooling WITH compensation (matching target)
+    Show effect of thermal expansion compensation:
+      Row 1 — without compensation → cooled pattern shrinks
+      Row 2 — with compensation → cooled pattern matches target
     """
     ensure_output_dir()
-    print("  Generating thermal compensation visualization ...")
+    print("  Generating thermal compensation visualisation …")
 
-    size = 128
+    size = 256
+    pixel_size = EUV_PIXEL
     target = create_arbitrary_pattern(size, 'cross')
     thermal = ThermalExpansionModel(process_temp=200.0, operating_temp=80.0)
     info = thermal.get_info()
 
-    diffraction = FraunhoferDiffraction(wavelength=193.0, NA=0.6)
+    diffraction = FraunhoferDiffraction(
+        wavelength=EUV_WAVELENGTH, pixel_size=pixel_size, NA=EUV_NA)
 
-    # WITHOUT thermal compensation: optimize directly for target
+    # WITHOUT thermal compensation
     opt_no_comp = AdaptiveMaskOptimizer(
         diffraction, (size, size), learning_rate=0.05,
-        regularization=0.005, use_scheduler=True)
+        regularization=0.001, use_scheduler=True)
     res_no_comp = opt_no_comp.optimize(
-        target, num_iterations=200, verbose=False, early_stopping_patience=40)
+        target, num_iterations=300, verbose=False, early_stopping_patience=50)
     with torch.no_grad():
         aerial_no_comp = diffraction(res_no_comp['mask']).squeeze()
         cooled_no_comp = thermal.apply_thermal_contraction(aerial_no_comp)
@@ -290,33 +324,31 @@ def generate_thermal_compensation_image():
     # WITH thermal compensation
     opt_comp = ThermalAwareMaskOptimizer(
         diffraction, (size, size), thermal,
-        learning_rate=0.05, regularization=0.005, use_scheduler=True)
+        learning_rate=0.05, regularization=0.001, use_scheduler=True)
     res_comp = opt_comp.optimize(
-        target, num_iterations=200, verbose=False, early_stopping_patience=40)
+        target, num_iterations=300, verbose=False, early_stopping_patience=50)
     with torch.no_grad():
         aerial_comp = diffraction(res_comp['mask']).squeeze()
         cooled_comp = thermal.apply_thermal_contraction(aerial_comp)
 
-    # Difference maps
     diff_no_comp = torch.abs(cooled_no_comp - target)
     diff_comp = torch.abs(cooled_comp - target)
 
-    fig, axes = plt.subplots(2, 4, figsize=(18, 9))
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
 
     titles_top = [
         f'Target (at {info["operating_temp_C"]}°C)',
-        f'Aerial image at {info["process_temp_C"]}°C\n(no compensation)',
-        f'After cooling to {info["operating_temp_C"]}°C\n(no compensation)',
-        'Error map (no comp.)'
+        f'Aerial @ {info["process_temp_C"]}°C\n(no compensation)',
+        f'Cooled to {info["operating_temp_C"]}°C\n(no compensation)',
+        'Error (no comp.)'
     ]
     imgs_top = [target.numpy(), aerial_no_comp.numpy(),
                 cooled_no_comp.numpy(), diff_no_comp.numpy()]
-
     titles_bot = [
         f'Target (at {info["operating_temp_C"]}°C)',
-        f'Aerial image at {info["process_temp_C"]}°C\n(WITH compensation)',
-        f'After cooling to {info["operating_temp_C"]}°C\n(WITH compensation)',
-        'Error map (WITH comp.)'
+        f'Aerial @ {info["process_temp_C"]}°C\n(WITH compensation)',
+        f'Cooled to {info["operating_temp_C"]}°C\n(WITH compensation)',
+        'Error (WITH comp.)'
     ]
     imgs_bot = [target.numpy(), aerial_comp.numpy(),
                 cooled_comp.numpy(), diff_comp.numpy()]
@@ -326,22 +358,23 @@ def generate_thermal_compensation_image():
         axes[0, j].imshow(imgs_top[j], cmap=cmap, vmin=0,
                           vmax=1 if j < 3 else None)
         axes[0, j].set_title(titles_top[j], fontsize=10, fontweight='bold')
-        axes[0, j].axis('off')
+        _set_nm_axes(axes[0, j], size, pixel_size, label=False)
 
         axes[1, j].imshow(imgs_bot[j], cmap=cmap, vmin=0,
                           vmax=1 if j < 3 else None)
         axes[1, j].set_title(titles_bot[j], fontsize=10, fontweight='bold')
-        axes[1, j].axis('off')
+        _set_nm_axes(axes[1, j], size, pixel_size, label=False)
 
     mse_no = torch.mean(diff_no_comp ** 2).item()
     mse_comp = torch.mean(diff_comp ** 2).item()
     fig.suptitle(
-        f'Thermal Compensation  —  Si wafer {info["process_temp_C"]}°C → '
+        f'Thermal Compensation — Si wafer {info["process_temp_C"]}°C → '
         f'{info["operating_temp_C"]}°C  '
         f'(contraction {info["contraction_ppm"]:.1f} ppm)\n'
-        f'MSE without comp: {mse_no:.6f}  |  MSE with comp: {mse_comp:.6f}',
-        fontsize=13, fontweight='bold')
-    plt.tight_layout(rect=[0, 0, 1, 0.90])
+        f'MSE w/o comp: {mse_no:.6f}  |  MSE w/ comp: {mse_comp:.6f}  '
+        f'(EUV λ = {EUV_WAVELENGTH} nm, NA = {EUV_NA})',
+        fontsize=12, fontweight='bold')
+    plt.tight_layout(rect=[0, 0, 1, 0.89])
     path = os.path.join(OUTPUT_DIR, 'thermal_compensation.png')
     fig.savefig(path, dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -355,48 +388,53 @@ def generate_thermal_compensation_image():
 
 def generate_arbitrary_shapes_gallery():
     """
-    Demonstrate that the engine handles arbitrary input shapes and dimensions.
-    Shows inverse optimization for multiple custom shapes.
+    ILT for several arbitrary input geometries under EUV.
+    Clear diffraction visible in aerial images.
     """
     ensure_output_dir()
-    print("  Generating arbitrary shapes gallery ...")
+    print("  Generating arbitrary shapes gallery …")
 
     shapes = ['L_shape', 'T_shape', 'ring', 'cross', 'diamond', 'zigzag']
-    size = 128
-    diffraction = FraunhoferDiffraction(wavelength=193.0, NA=0.6)
+    size = 256
+    pixel_size = EUV_PIXEL
+    diffraction = FraunhoferDiffraction(
+        wavelength=EUV_WAVELENGTH, pixel_size=pixel_size, NA=EUV_NA)
 
-    fig, axes = plt.subplots(len(shapes), 3, figsize=(12, len(shapes) * 3.2))
+    fig, axes = plt.subplots(len(shapes), 3, figsize=(14, len(shapes) * 3.5))
 
     for i, name in enumerate(shapes):
         target = create_arbitrary_pattern(size, name)
         opt = AdaptiveMaskOptimizer(
             diffraction, (size, size), learning_rate=0.05,
-            regularization=0.005, use_scheduler=True)
-        res = opt.optimize(target, num_iterations=200, verbose=False,
-                           early_stopping_patience=40)
+            regularization=0.001, use_scheduler=True)
+        res = opt.optimize(target, num_iterations=300, verbose=False,
+                           early_stopping_patience=50)
         with torch.no_grad():
             pred = diffraction(res['mask']).squeeze().cpu().numpy()
 
         axes[i, 0].imshow(target.numpy(), cmap='inferno', vmin=0, vmax=1)
         axes[i, 0].set_title('Target', fontsize=10, fontweight='bold')
-        axes[i, 0].axis('off')
+        _set_nm_axes(axes[i, 0], size, pixel_size, label=False)
 
         axes[i, 1].imshow(res['mask'].squeeze().cpu().numpy(),
                           cmap='gray', vmin=0, vmax=1)
-        axes[i, 1].set_title('Optimized Mask', fontsize=10, fontweight='bold')
-        axes[i, 1].axis('off')
+        axes[i, 1].set_title('Optimised Mask', fontsize=10, fontweight='bold')
+        _set_nm_axes(axes[i, 1], size, pixel_size, label=False)
 
         axes[i, 2].imshow(pred, cmap='inferno', vmin=0, vmax=1)
         axes[i, 2].set_title(f'Aerial Image (loss={res["final_loss"]:.4f})',
                              fontsize=10, fontweight='bold')
-        axes[i, 2].axis('off')
+        _set_nm_axes(axes[i, 2], size, pixel_size, label=False)
 
         axes[i, 0].set_ylabel(name, fontsize=11, fontweight='bold',
                               rotation=0, labelpad=60, va='center')
 
-    fig.suptitle('Inverse Lithography — Arbitrary Input Shapes',
-                 fontsize=14, fontweight='bold')
-    plt.tight_layout(rect=[0.08, 0, 1, 0.96])
+    fig.suptitle(
+        f'EUV Inverse Lithography — Arbitrary Input Shapes\n'
+        f'λ = {EUV_WAVELENGTH} nm · NA = {EUV_NA} · '
+        f'pixel = {pixel_size} nm · field = {size} nm × {size} nm',
+        fontsize=13, fontweight='bold')
+    plt.tight_layout(rect=[0.08, 0, 1, 0.94])
     path = os.path.join(OUTPUT_DIR, 'arbitrary_shapes_gallery.png')
     fig.savefig(path, dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -409,43 +447,50 @@ def generate_arbitrary_shapes_gallery():
 # ---------------------------------------------------------------------------
 
 def generate_multi_size_image():
-    """Show that the engine works with arbitrary dimensions."""
+    """Show the engine works at different field-of-view sizes (all EUV)."""
     ensure_output_dir()
-    print("  Generating multi-size demonstration ...")
+    print("  Generating multi-size demonstration …")
 
-    sizes = [64, 128, 256]
-    diffraction = FraunhoferDiffraction(wavelength=193.0, NA=0.6)
+    sizes = [128, 256, 512]
+    pixel_size = EUV_PIXEL
+    diffraction = FraunhoferDiffraction(
+        wavelength=EUV_WAVELENGTH, pixel_size=pixel_size, NA=EUV_NA)
 
-    fig, axes = plt.subplots(len(sizes), 3, figsize=(12, len(sizes) * 3.5))
+    fig, axes = plt.subplots(len(sizes), 3, figsize=(14, len(sizes) * 4))
 
     for i, sz in enumerate(sizes):
         target = create_arbitrary_pattern(sz, 'cross')
+        iters = 200 if sz <= 256 else 150
         opt = AdaptiveMaskOptimizer(
             diffraction, (sz, sz), learning_rate=0.05,
-            regularization=0.005, use_scheduler=True)
-        res = opt.optimize(target, num_iterations=200, verbose=False,
+            regularization=0.001, use_scheduler=True)
+        res = opt.optimize(target, num_iterations=iters, verbose=False,
                            early_stopping_patience=40)
         with torch.no_grad():
             pred = diffraction(res['mask']).squeeze().cpu().numpy()
 
+        fov = sz * pixel_size
         axes[i, 0].imshow(target.numpy(), cmap='inferno', vmin=0, vmax=1)
-        axes[i, 0].set_title(f'Target ({sz}×{sz})', fontsize=10,
-                             fontweight='bold')
-        axes[i, 0].axis('off')
+        axes[i, 0].set_title(
+            f'Target ({sz}×{sz} px, {fov:.0f}×{fov:.0f} nm)',
+            fontsize=10, fontweight='bold')
+        _set_nm_axes(axes[i, 0], sz, pixel_size, label=False)
 
         axes[i, 1].imshow(res['mask'].squeeze().cpu().numpy(),
                           cmap='gray', vmin=0, vmax=1)
-        axes[i, 1].set_title('Optimized Mask', fontsize=10, fontweight='bold')
-        axes[i, 1].axis('off')
+        axes[i, 1].set_title('Optimised Mask', fontsize=10, fontweight='bold')
+        _set_nm_axes(axes[i, 1], sz, pixel_size, label=False)
 
         axes[i, 2].imshow(pred, cmap='inferno', vmin=0, vmax=1)
-        axes[i, 2].set_title(f'Result (loss={res["final_loss"]:.4f})',
+        axes[i, 2].set_title(f'Aerial Image (loss={res["final_loss"]:.4f})',
                              fontsize=10, fontweight='bold')
-        axes[i, 2].axis('off')
+        _set_nm_axes(axes[i, 2], sz, pixel_size, label=False)
 
-    fig.suptitle('Arbitrary Dimensions — 64×64, 128×128, 256×256',
-                 fontsize=14, fontweight='bold')
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.suptitle(
+        f'EUV ILT — Multiple Field-of-View Sizes\n'
+        f'λ = {EUV_WAVELENGTH} nm · NA = {EUV_NA} · pixel = {pixel_size} nm',
+        fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
     path = os.path.join(OUTPUT_DIR, 'multi_size_demo.png')
     fig.savefig(path, dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -454,31 +499,31 @@ def generate_multi_size_image():
 
 
 # ---------------------------------------------------------------------------
-# 6. Thermal-aware optimization animation
+# 6. Thermal-aware optimisation animation
 # ---------------------------------------------------------------------------
 
-def generate_thermal_optimization_animation(size=128, n_iterations=200):
+def generate_thermal_optimization_animation(size=256, n_iterations=300):
     """
-    GIF showing thermal-aware optimization: the mask converges to produce
-    a pattern that, after cooling, matches the target.
+    GIF: thermal-aware ILT — mask converges such that the cooled wafer
+    pattern matches the target.
     """
     ensure_output_dir()
-    print("  Generating thermal-aware optimization animation ...")
+    print("  Generating thermal-aware optimisation animation …")
 
+    pixel_size = EUV_PIXEL
+    fov_nm = size * pixel_size
     target = create_arbitrary_pattern(size, 'diamond')
     thermal = ThermalExpansionModel(process_temp=200.0, operating_temp=80.0)
-    diffraction = FraunhoferDiffraction(wavelength=193.0, NA=0.6)
+    diffraction = FraunhoferDiffraction(
+        wavelength=EUV_WAVELENGTH, pixel_size=pixel_size, NA=EUV_NA)
     info = thermal.get_info()
 
     compensated_target = thermal.apply_thermal_precompensation(target)
 
-    import torch.nn as nn
-    import torch.optim as optim
-
     mask_param = nn.Parameter(torch.rand(size, size))
     optimizer = optim.Adam([mask_param], lr=0.05)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=20)
+        optimizer, mode='min', factor=0.5, patience=25)
 
     frames = []
     loss_history = []
@@ -502,42 +547,44 @@ def generate_thermal_optimization_animation(size=128, n_iterations=200):
                 cooled = thermal.apply_thermal_contraction(
                     predicted.squeeze()).cpu().numpy()
 
-            fig, axes = plt.subplots(1, 5, figsize=(22, 4))
+            fig, axes = plt.subplots(1, 5, figsize=(24, 4.5))
 
             axes[0].imshow(target.numpy(), cmap='inferno', vmin=0, vmax=1)
             axes[0].set_title(f'Target ({info["operating_temp_C"]}°C)',
                               fontsize=10, fontweight='bold')
-            axes[0].axis('off')
+            _set_nm_axes(axes[0], size, pixel_size)
 
             axes[1].imshow(mask_np, cmap='gray', vmin=0, vmax=1)
-            axes[1].set_title(f'Mask (iter {it})', fontsize=10,
-                              fontweight='bold')
-            axes[1].axis('off')
+            axes[1].set_title(f'Mask (iter {it})',
+                              fontsize=10, fontweight='bold')
+            _set_nm_axes(axes[1], size, pixel_size)
 
             axes[2].imshow(pred_np, cmap='inferno', vmin=0, vmax=1)
             axes[2].set_title(f'Aerial @ {info["process_temp_C"]}°C',
                               fontsize=10, fontweight='bold')
-            axes[2].axis('off')
+            _set_nm_axes(axes[2], size, pixel_size)
 
             axes[3].imshow(cooled, cmap='inferno', vmin=0, vmax=1)
             axes[3].set_title(f'Cooled to {info["operating_temp_C"]}°C',
                               fontsize=10, fontweight='bold')
-            axes[3].axis('off')
+            _set_nm_axes(axes[3], size, pixel_size)
 
             axes[4].plot(loss_history, color='#FF5722', linewidth=2)
             axes[4].set_xlabel('Iteration')
-            axes[4].set_ylabel('Loss')
+            axes[4].set_ylabel('MSE Loss')
             axes[4].set_title('Convergence', fontsize=10, fontweight='bold')
             axes[4].set_yscale('log')
             axes[4].grid(True, alpha=0.3)
             axes[4].set_xlim(0, n_iterations)
 
             fig.suptitle(
-                f'Thermal-Aware ILT — '
+                f'Thermal-Aware EUV ILT — '
                 f'{info["process_temp_C"]}°C → {info["operating_temp_C"]}°C  '
-                f'(contraction {info["contraction_ppm"]:.1f} ppm)',
-                fontsize=13, fontweight='bold')
-            plt.tight_layout(rect=[0, 0, 1, 0.92])
+                f'(contraction {info["contraction_ppm"]:.1f} ppm)  ·  '
+                f'λ = {EUV_WAVELENGTH} nm, NA = {EUV_NA}, '
+                f'FoV = {fov_nm:.0f} nm',
+                fontsize=12, fontweight='bold')
+            plt.tight_layout(rect=[0, 0, 1, 0.91])
 
             buf = io.BytesIO()
             fig.savefig(buf, format='png', dpi=100)
@@ -560,15 +607,17 @@ def generate_thermal_optimization_animation(size=128, n_iterations=200):
 # ---------------------------------------------------------------------------
 
 def main():
-    print("=" * 60)
-    print("Generating Visualizations & Animations")
-    print("=" * 60)
+    print("=" * 70)
+    print("  Generating EUV Lithography Visualisations & Animations")
+    print(f"  λ = {EUV_WAVELENGTH} nm · NA = {EUV_NA} · "
+          f"pixel = {EUV_PIXEL} nm")
+    print("=" * 70)
 
-    # 1. Optimization animations for various patterns
+    # 1. Optimisation animations for various patterns
     for pat in ['cross', 'ring', 'diamond']:
-        generate_optimization_animation(pat, size=128, n_iterations=200)
+        generate_optimization_animation(pat, size=256, n_iterations=300)
 
-    # 2. Forward diffraction comparison (multiple wavelengths / NA)
+    # 2. Forward diffraction comparison (multiple NAs)
     generate_forward_diffraction_image()
 
     # 3. Thermal compensation
@@ -580,13 +629,13 @@ def main():
     # 5. Multi-size demo
     generate_multi_size_image()
 
-    # 6. Thermal-aware optimization animation
+    # 6. Thermal-aware optimisation animation
     generate_thermal_optimization_animation()
 
-    print("\n" + "=" * 60)
-    print("All visualizations generated successfully!")
-    print(f"Output directory: {os.path.abspath(OUTPUT_DIR)}")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("  All visualisations generated successfully!")
+    print(f"  Output directory: {os.path.abspath(OUTPUT_DIR)}")
+    print("=" * 70)
 
 
 if __name__ == '__main__':

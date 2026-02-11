@@ -1,61 +1,61 @@
 # Computational Lithography Engine
 
-A differentiable physics engine for computational lithography, simulating Fraunhofer diffraction and implementing inverse mask optimization (in PyTorch).
+A differentiable physics engine for **EUV (Extreme Ultraviolet) computational lithography**, simulating Fraunhofer diffraction and implementing inverse mask optimisation in PyTorch. Designed around ASML-class EUV parameters (λ = 13.5 nm).
 
 ## Visual Proof — It Works!
 
-### Inverse Mask Optimization (Animated)
+### Inverse Mask Optimisation (Animated)
 
-The engine automatically finds the optimal photomask that produces any desired chip pattern. Watch the optimizer converge in real time:
+The engine automatically finds the optimal photomask that produces any desired chip pattern under realistic EUV diffraction. Watch the optimiser converge in real time — note how the **optimised mask differs significantly from the target** due to diffraction compensation:
 
-![Inverse lithography optimization — cross pattern](docs/images/optimization_cross.gif)
+![Inverse lithography optimisation — cross pattern](docs/images/optimization_cross.gif)
 
-![Inverse lithography optimization — ring pattern](docs/images/optimization_ring.gif)
+![Inverse lithography optimisation — ring pattern](docs/images/optimization_ring.gif)
 
-![Inverse lithography optimization — diamond pattern](docs/images/optimization_diamond.gif)
+![Inverse lithography optimisation — diamond pattern](docs/images/optimization_diamond.gif)
 
 ### Arbitrary Input Shapes
 
-The engine handles **any** target geometry — L-shapes, T-shapes, rings, crosses, diamonds, zigzags, and more:
+The engine handles **any** target geometry — L-shapes, T-shapes, rings, crosses, diamonds, zigzags, and more. All at nm-scale with visible EUV diffraction effects:
 
 ![Arbitrary shapes gallery](docs/images/arbitrary_shapes_gallery.png)
 
-### Multiple Wavelengths & Numerical Apertures
+### EUV Forward Diffraction — Varying Numerical Aperture
 
-Forward diffraction simulation across different lithography configurations — DUV (193 nm), KrF (248 nm), and EUV (13.5 nm) — with varying numerical apertures:
+Forward diffraction simulation at **λ = 13.5 nm** across different NA values (0.25, 0.33, 0.55 High-NA). Axes are labelled in nanometres. Diffraction effects (blurring, ringing, Airy patterns) are clearly visible:
 
 ![Forward diffraction comparison](docs/images/forward_diffraction_comparison.png)
 
-### Arbitrary Dimensions
+### Multiple Field-of-View Sizes
 
-Works with any mask size — demonstrated here at 64×64, 128×128, and 256×256:
+Works with any mask dimensions — demonstrated here at 128 nm, 256 nm, and 512 nm fields of view:
 
 ![Multi-size demonstration](docs/images/multi_size_demo.png)
 
 ### Thermal Compensation (Silicon Wafer Heating & Cooling)
 
-During lithography the wafer is hot (200 °C). When it cools to operating temperature (80 °C), silicon contracts. Without compensation the printed pattern shrinks and no longer matches the target. The engine pre-compensates the mask so the **cooled-down chip perfectly matches the intended geometry**:
+During EUV lithography the wafer is hot (200 °C). When it cools to operating temperature (80 °C), silicon contracts according to its temperature-dependent coefficient of thermal expansion (CTE). Without compensation the printed pattern shrinks and no longer matches the target. The engine pre-compensates the mask so the **cooled-down chip perfectly matches the intended geometry**:
 
 ![Thermal compensation](docs/images/thermal_compensation.png)
 
-### Thermal-Aware Optimization (Animated)
+### Thermal-Aware Optimisation (Animated)
 
-Full thermal-aware inverse lithography: the optimizer accounts for silicon thermal expansion coefficients so the pattern at 80 °C matches the target:
+Full thermal-aware inverse lithography: the optimiser accounts for silicon thermal expansion coefficients so the pattern at 80 °C matches the target:
 
-![Thermal-aware optimization animation](docs/images/thermal_optimization.gif)
+![Thermal-aware optimisation animation](docs/images/thermal_optimization.gif)
 
 ---
 
 ## Overview
 
-This engine provides a complete framework for computational lithography simulations, including:
+This engine provides a complete framework for **EUV computational lithography** simulations, including:
 
-- **Fraunhofer Diffraction Simulation**: Physics-based modeling of far-field diffraction patterns using Fast Fourier Transform (FFT)
-- **Inverse Lithography Technology (ILT)**: Gradient-based optimization to find optimal mask patterns
-- **Thermal Expansion Modeling**: Silicon wafer heating/cooling effects with temperature-dependent CTE
-- **Thermal-Aware Optimization**: Pre-compensates masks so the cooled chip matches the target geometry
+- **Fraunhofer Diffraction Simulation**: Physics-based modelling of far-field diffraction patterns using FFT with correct physical-units pupil function (cutoff = NA/λ)
+- **Inverse Lithography Technology (ILT)**: Gradient-based optimisation to find optimal mask patterns that compensate for diffraction
+- **Thermal Expansion Modelling**: Silicon wafer heating/cooling effects with temperature-dependent CTE (Okada & Tokumaru, 1984)
+- **Thermal-Aware Optimisation**: Pre-compensates masks so the cooled chip (80 °C) matches the target geometry
 - **Differentiable Architecture**: Built on PyTorch for automatic differentiation and GPU acceleration
-- **Numerical Aperture Modeling**: Realistic optical system constraints
+- **EUV-Focused**: Default parameters set for λ = 13.5 nm, NA = 0.33, nm-scale pixel size — where diffraction effects are significant and clearly visible
 
 ## Installation
 
@@ -85,11 +85,11 @@ import torch
 from litho_engine import FraunhoferDiffraction
 from litho_engine.diffraction import create_test_mask
 
-# Create diffraction model (DUV lithography parameters)
+# Create diffraction model (EUV lithography parameters)
 diffraction = FraunhoferDiffraction(
-    wavelength=193.0,  # nm
-    pixel_size=10.0,   # nm
-    NA=0.6             # Numerical aperture
+    wavelength=13.5,   # nm — EUV
+    pixel_size=1.0,    # nm per pixel
+    NA=0.33            # Numerical aperture
 )
 
 # Create a test mask
@@ -245,14 +245,14 @@ Where:
 
 ### Numerical Aperture
 
-The pupil function limits the spatial frequencies that can pass through:
+The pupil function limits the spatial frequencies that can pass through the optical system. The cutoff is determined by the physical relationship between NA and wavelength:
 
 ```
-P(fx,fy) = 1 if √(fx² + fy²) ≤ NA/λ
+P(fx,fy) = 1 if √(fx² + fy²) ≤ NA/λ   (cycles/nm)
          = 0 otherwise
 ```
 
-This creates the fundamental resolution limit in optical lithography.
+This creates the fundamental resolution limit in optical lithography. For EUV at λ = 13.5 nm with NA = 0.33, the cutoff frequency is ~0.024 cycles/nm, meaning features smaller than ~20 nm are strongly diffracted.
 
 ### Inverse Optimization
 

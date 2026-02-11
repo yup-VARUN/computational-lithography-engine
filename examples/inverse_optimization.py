@@ -70,10 +70,10 @@ def main():
     print("Inverse Mask Optimization (ILT)")
     print("=" * 60)
     
-    # Setup diffraction model
-    wavelength = 193.0
-    pixel_size = 10.0
-    NA = 0.6
+    # Setup diffraction model (EUV parameters)
+    wavelength = 13.5   # nm (EUV)
+    pixel_size = 1.0    # nm
+    NA = 0.33
     
     diffraction = FraunhoferDiffraction(
         wavelength=wavelength,
@@ -83,7 +83,7 @@ def main():
     )
     
     print(f"\nDiffraction Model Parameters:")
-    print(f"  Wavelength: {wavelength} nm")
+    print(f"  Wavelength: {wavelength} nm (EUV)")
     print(f"  Numerical Aperture: {NA}")
     
     # Create target pattern

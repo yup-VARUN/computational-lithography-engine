@@ -15,7 +15,7 @@ def demo_forward(mask_type='square', size=128):
     print("FORWARD DIFFRACTION DEMO")
     print("="*60)
     
-    diffraction = FraunhoferDiffraction(wavelength=193.0, NA=0.6)
+    diffraction = FraunhoferDiffraction(wavelength=13.5, pixel_size=1.0, NA=0.33)
     mask = create_test_mask(size=size, pattern_type=mask_type)
     
     print(f"\nMask: {mask_type} ({size}×{size})")
@@ -35,7 +35,7 @@ def demo_inverse(target_type='circle', size=64, iterations=50):
     print("INVERSE OPTIMIZATION DEMO")
     print("="*60)
     
-    diffraction = FraunhoferDiffraction(wavelength=193.0, NA=0.6)
+    diffraction = FraunhoferDiffraction(wavelength=13.5, pixel_size=1.0, NA=0.33)
     target = create_test_mask(size=size, pattern_type=target_type)
     
     print(f"\nTarget: {target_type} ({size}×{size})")
